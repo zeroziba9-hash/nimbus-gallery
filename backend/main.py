@@ -1,7 +1,6 @@
-<<<<<<< HEAD
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import boto3
 import uuid
@@ -11,20 +10,6 @@ import models
 import auth
 
 models.Base.metadata.create_all(bind=engine)
-=======
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
-import boto3
-import uuid
-from sqlalchemy.orm import Session
-from database import get_db, engine
-from models import Base, User, Image as ImageModel
-from auth import hash_password, verify_password, create_access_token, get_current_user
-
-Base.metadata.create_all(bind=engine)
->>>>>>> origin/main
 
 app = FastAPI(title="Nimbus Gallery API")
 
@@ -44,8 +29,6 @@ dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 table = dynamodb.Table("nimbus-images")
 
 
-# ── Auth schemas ──────────────────────────────────────────────
-
 class RegisterRequest(BaseModel):
     email: str
     password: str
@@ -63,8 +46,6 @@ class TokenResponse(BaseModel):
     tier: str
 
 
-# ── Image schemas ─────────────────────────────────────────────
-
 class PresignedUrlRequest(BaseModel):
     filename: str
     content_type: str
@@ -76,26 +57,11 @@ class PresignedUrlResponse(BaseModel):
     cdn_url: str
 
 
-<<<<<<< HEAD
-# ── Auth endpoints ────────────────────────────────────────────
-=======
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
->>>>>>> origin/main
-
 @app.get("/")
 def root():
     return {"message": "Nimbus Gallery API", "status": "ok"}
 
 
-<<<<<<< HEAD
 @app.post("/api/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
     if db.query(models.User).filter(models.User.email == req.email).first():
@@ -125,33 +91,6 @@ def me(current_user: models.User = Depends(auth.get_current_user)):
     return {"id": current_user.id, "email": current_user.email, "tier": current_user.tier}
 
 
-# ── Image endpoints (JWT 보호) ─────────────────────────────────
-
-=======
-@app.post("/api/auth/register", response_model=TokenResponse)
-def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == req.email).first():
-        raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다")
-    user = User(email=req.email, password_hash=hash_password(req.password))
-    db.add(user)
-    db.commit()
-    return TokenResponse(access_token=create_access_token({"sub": user.email}))
-
-
-@app.post("/api/auth/login", response_model=TokenResponse)
-def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == form.username).first()
-    if not user or not verify_password(form.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다")
-    return TokenResponse(access_token=create_access_token({"sub": user.email}))
-
-
-@app.get("/api/auth/me")
-def me(current_user: User = Depends(get_current_user)):
-    return {"email": current_user.email, "tier": current_user.tier}
-
-
->>>>>>> origin/main
 @app.post("/api/upload/presigned", response_model=PresignedUrlResponse)
 def get_presigned_url(req: PresignedUrlRequest):
     ext = req.filename.rsplit(".", 1)[-1].lower()
