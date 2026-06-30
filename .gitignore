@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.env
+backend/.env
+
+# Node
+node_modules/
+dist/
+
+# Lambda 패키지 (용량 큼)
+lambda/thumbnail/package/
+lambda/thumbnail/thumbnail_lambda.zip
+
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/terraform.tfvars
+*.pem

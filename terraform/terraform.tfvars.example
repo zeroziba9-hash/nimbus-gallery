@@ -1,0 +1,4 @@
+aws_region   = "ap-northeast-2"
+project      = "nimbus-gallery"
+db_password  = "your-secure-password-here"
+ec2_key_name = "nimbus-key"

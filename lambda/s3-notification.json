@@ -1,0 +1,18 @@
+{
+  "LambdaFunctionConfigurations": [
+    {
+      "LambdaFunctionArn": "arn:aws:lambda:ap-northeast-2:116137269423:function:nimbus-thumbnail",
+      "Events": ["s3:ObjectCreated:*"],
+      "Filter": {
+        "Key": {
+          "FilterRules": [
+            {
+              "Name": "prefix",
+              "Value": "images/"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

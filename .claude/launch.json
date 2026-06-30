@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "architecture",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "docs", "-p", "5200", "--no-clipboard"],
+      "port": 5200
+    }
+  ]
+}
