@@ -12,8 +12,7 @@ env:
   AWS_REGION: ap-northeast-2
   ECR_REGISTRY: 116137269423.dkr.ecr.ap-northeast-2.amazonaws.com
   ECR_REPOSITORY: nimbus-gallery
-  EC2_HOST: 3.34.44.85
-  EC2_USER: ubuntu
+  EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
 
 jobs:
   deploy:
@@ -41,28 +40,18 @@ jobs:
           docker push $IMAGE_URI
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
-      - name: Get ECR login password
-        id: ecr-password
-        run: echo "password=$(aws ecr get-login-password --region $AWS_REGION)" >> $GITHUB_OUTPUT
-
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ env.EC2_HOST }}
-          username: ${{ env.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          envs: ECR_PASSWORD,IMAGE_URI
-          script: |
-            echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin 116137269423.dkr.ecr.ap-northeast-2.amazonaws.com
-            docker pull $IMAGE_URI
-            docker stop nimbus-api || true
-            docker rm nimbus-api || true
-            docker run -d \
-              --name nimbus-api \
-              --restart always \
-              -p 8000:8000 \
-              -e DATABASE_URL=${{ secrets.DATABASE_URL }} \
-              $IMAGE_URI
+      - name: Deploy via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="[
+              \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
+              \"docker pull $IMAGE_URI\",
+              \"docker stop nimbus-api || true\",
+              \"docker rm nimbus-api || true\",
+              \"docker run -d --name nimbus-api --restart always -p 8000:8000 -e DATABASE_URL=${{ secrets.DATABASE_URL }} $IMAGE_URI\"
+            ]" \
+            --region ${{ env.AWS_REGION }}
         env:
-          ECR_PASSWORD: ${{ steps.ecr-password.outputs.password }}
           IMAGE_URI: ${{ env.IMAGE_URI }}
