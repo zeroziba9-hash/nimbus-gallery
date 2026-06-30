@@ -99,6 +99,7 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [shareImage, setShareImage] = useState(null);
+  const [uploadError, setUploadError] = useState("");
 
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -159,6 +160,7 @@ export default function App() {
 
   async function uploadFile(file) {
     setUploading(true);
+    setUploadError("");
     try {
       const { data } = await axios.post(`${API}/api/upload/presigned`, {
         filename: file.name,
@@ -167,14 +169,15 @@ export default function App() {
       await axios.put(data.upload_url, file, {
         headers: { "Content-Type": file.type },
       });
-      // 태그가 붙을 때까지 잠깐 대기
       setTimeout(async () => {
         await fetchImages();
-        // 방금 올린 이미지 찾아서 공유 모달 열기
         const res = await axios.get(`${API}/api/images`);
         const uploaded = res.data.images.find((img) => img.key === data.image_key);
         setShareImage(uploaded || { key: data.image_key, cdn_url: data.cdn_url, tags: [] });
       }, 1500);
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || "업로드 실패";
+      setUploadError(msg);
     } finally {
       setUploading(false);
     }
@@ -256,7 +259,9 @@ export default function App() {
       >
         {uploading
           ? <p>⏳ 업로드 중...</p>
-          : <><p>🖼 이미지를 드래그하거나 클릭해서 업로드</p><p className="upload-sub">로그인 없이 바로 사용 가능</p></>
+          : uploadError
+            ? <><p style={{color:"#f87171"}}>❌ {uploadError}</p><p className="upload-sub">다시 시도하려면 클릭</p></>
+            : <><p>🖼 이미지를 드래그하거나 클릭해서 업로드</p><p className="upload-sub">로그인 없이 바로 사용 가능</p></>
         }
         <input id="fileInput" type="file" accept="image/*" style={{ display: "none" }} onChange={onFileChange} />
       </div>
