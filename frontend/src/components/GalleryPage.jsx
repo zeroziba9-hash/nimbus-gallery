@@ -1,38 +1,64 @@
+import { useState, useEffect } from 'react';
 import ImageCard     from './ImageCard';
 import ImageListItem from './ImageListItem';
 
+function useCountUp(target, duration = 1200) {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (target === 0) return;
+    const start = performance.now();
+    const ease = (t) => t < .5 ? 2*t*t : -1+(4-2*t)*t;
+    const tick = (now) => {
+      const t = Math.min((now - start) / duration, 1);
+      setValue(Math.round(target * ease(t)));
+      if (t < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, [target]);
+  return value;
+}
+
 export default function GalleryPage({
-  images, allTags, totalCount,
+  images, allTags, totalCount, albums,
   filter, onFilter, search, onSearch, sortBy, onSort, viewMode, onViewMode,
   selMode, onToggleSelMode, selIds, onToggleSelect, onBulkDelete,
   uploadPct, isDragging, onDragOver, onDragLeave, onDrop, onFileChange,
   onOpenLightbox, onShare, onAlbum, onDelete,
 }) {
+  const totalViews = images.reduce((s, i) => s + (i.views || 0), 0);
+  const animImages = useCountUp(totalCount);
+  const animAlbums = useCountUp(albums?.length ?? 0);
+  const animViews  = useCountUp(totalViews);
+
   return (
     <main className="page" style={{ paddingTop: 0 }}>
       {/* Hero */}
       <div className="hero">
         <div className="hero-glow" />
-        <h1 className="hero-title">
-          Cloud-native<br />
-          <span className="gradient-text">Image Hosting</span>
+        <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 72, fontWeight: 700, letterSpacing: '-3px', lineHeight: 1, marginBottom: 16, position: 'relative' }}>
+          NIMBUS
         </h1>
-        <p className="hero-sub">AWS S3 · CloudFront CDN · Lambda · Rekognition AI</p>
+        <p style={{ fontFamily: 'var(--font-heading)', fontSize: 18, fontWeight: 500, marginBottom: 0, position: 'relative' }}>
+          <span className="gradient-text">No limbus. Pure nimbus.</span>
+        </p>
       </div>
 
       {/* Stats */}
       <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-num">{totalCount}</div>
-          <div className="stat-label">TOTAL IMAGES</div>
+        <div className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 120%, oklch(62% 0.22 265 / 0.08) 0%, transparent 70%)', pointerEvents: 'none' }} />
+          <div className="stat-num">{animImages}</div>
+          <div className="stat-label">IMAGES</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-num gradient-text">CDN</div>
-          <div className="stat-label">CLOUDFRONT</div>
+        <div className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 120%, oklch(62% 0.22 265 / 0.08) 0%, transparent 70%)', pointerEvents: 'none' }} />
+          <div className="stat-num gradient-text">{animAlbums}</div>
+          <div className="stat-label">ALBUMS</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-num gradient-text">AI</div>
-          <div className="stat-label">AUTO TAGGING</div>
+        <div className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 120%, oklch(72% 0.14 200 / 0.08) 0%, transparent 70%)', pointerEvents: 'none' }} />
+          <div className="stat-num gradient-text">{animViews.toLocaleString()}</div>
+          <div className="stat-label">TOTAL VIEWS</div>
         </div>
       </div>
 

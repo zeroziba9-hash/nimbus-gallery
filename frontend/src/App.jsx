@@ -278,7 +278,7 @@ export default function App() {
       )}
 
       {page === 'login' && (
-        <LoginPage onLogin={handleLogin} onGuest={handleGuest} />
+        <LoginPage onGuest={handleGuest} />
       )}
 
       {page === 'main' && (
@@ -286,6 +286,7 @@ export default function App() {
           images={processedImages}
           allTags={allTags}
           totalCount={images.length}
+          albums={albums}
           loading={loading}
           filter={filter}       onFilter={setFilter}
           search={search}       onSearch={setSearch}
