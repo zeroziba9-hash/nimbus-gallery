@@ -14,6 +14,7 @@ import {
   getToken, setToken, getUsername,
   fetchImages, uploadToS3, deleteImage,
 } from './api/gallery';
+import { exchangeCodeForTokens } from './api/cognito';
 import './App.css';
 
 function normalizeImage(apiImg) {
@@ -66,6 +67,28 @@ export default function App() {
   const [newAlbumOpen, setNewAlbumOpen] = useState(false);
 
   const { toasts, addToast } = useToast();
+
+  // ── Google OAuth callback ─────────────────────────────────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (!code) return;
+    window.history.replaceState({}, '', '/');
+    exchangeCodeForTokens(code)
+      .then(({ id_token }) => {
+        setToken(id_token);
+        const p = JSON.parse(atob(id_token.split('.')[1]));
+        const uname = p.email || p['cognito:username'] || 'user';
+        setIsLoggedIn(true);
+        setUsername(uname);
+        setPage('main');
+        addToast('Google 로그인 완료!', 'success');
+      })
+      .catch(() => {
+        addToast('Google 로그인 실패', 'error');
+        setPage('login');
+      });
+  }, [addToast]);
 
   // ── load images from API ──────────────────────────────────────────────────
   const loadImages = useCallback(async () => {

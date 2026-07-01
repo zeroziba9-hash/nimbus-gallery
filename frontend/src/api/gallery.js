@@ -4,10 +4,13 @@ const CDN_BASE = import.meta.env.VITE_CDN_URL  || 'https://d1pogf5m0mafe7.cloudf
 // ── Token helpers ──────────────────────────────────────────────────────────────
 export const getToken    = ()  => localStorage.getItem('nimbus_token');
 export const setToken    = (t) => t ? localStorage.setItem('nimbus_token', t) : localStorage.removeItem('nimbus_token');
-export const getUsername = ()  => {
+export const getUsername = () => {
   const token = getToken();
   if (!token) return '';
-  try { return JSON.parse(atob(token.split('.')[1])).sub; } catch { return ''; }
+  try {
+    const p = JSON.parse(atob(token.split('.')[1]));
+    return p.email || p['cognito:username'] || p.sub || '';
+  } catch { return ''; }
 };
 
 function authHeaders() {
