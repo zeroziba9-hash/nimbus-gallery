@@ -1,302 +1,347 @@
-import { useState, useEffect } from "react";
-import axios from "axios";
-import "./App.css";
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import Header        from './components/Header';
+import LoginPage     from './components/LoginPage';
+import GalleryPage   from './components/GalleryPage';
+import AlbumsPage    from './components/AlbumsPage';
+import AlbumDetail   from './components/AlbumDetail';
+import Lightbox      from './components/Lightbox';
+import ShareModal    from './components/ShareModal';
+import AlbumPicker   from './components/AlbumPicker';
+import NewAlbumModal from './components/NewAlbumModal';
+import ToastContainer from './components/ToastContainer';
+import { useToast }  from './hooks/useToast';
+import {
+  getToken, setToken, getUsername,
+  fetchImages, uploadToS3, deleteImage,
+} from './api/gallery';
+import './App.css';
 
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-const CDN = "https://d1pogf5m0mafe7.cloudfront.net";
-
-const COGNITO_DOMAIN = "https://nimbus-gallery.auth.ap-northeast-2.amazoncognito.com";
-const COGNITO_CLIENT_ID = "3p0i09ir9i3dh7uuqnm5d17i5c";
-const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || "http://localhost:5173/callback";
-
-function getGoogleLoginUrl() {
-  const params = new URLSearchParams({
-    client_id: COGNITO_CLIENT_ID,
-    response_type: "code",
-    scope: "email openid profile",
-    redirect_uri: REDIRECT_URI,
-    identity_provider: "Google",
-  });
-  return `${COGNITO_DOMAIN}/oauth2/authorize?${params}`;
-}
-
-async function exchangeCodeForToken(code) {
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    client_id: COGNITO_CLIENT_ID,
-    code,
-    redirect_uri: REDIRECT_URI,
-  });
-  const res = await fetch(`${COGNITO_DOMAIN}/oauth2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  return res.json();
-}
-
-function ShareModal({ image, onClose }) {
-  const [copied, setCopied] = useState("");
-
-  const directUrl = image.cdn_url;
-  const thumbUrl = `${CDN}/${image.key.replace("images/", "thumbnails/")}`;
-  const links = [
-    { label: "Direct Link", value: directUrl },
-    { label: "Markdown", value: `![image](${directUrl})` },
-    { label: "HTML", value: `<img src="${directUrl}" alt="image"/>` },
-    { label: "BBCode", value: `[img]${directUrl}[/img]` },
-  ];
-
-  function copy(value, label) {
-    navigator.clipboard.writeText(value);
-    setCopied(label);
-    setTimeout(() => setCopied(""), 1500);
-  }
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>✕</button>
-        <h2>업로드 완료!</h2>
-        <img src={thumbUrl} alt="uploaded" className="modal-preview"
-          onError={(e) => { e.target.src = directUrl; }} />
-        {image.tags && image.tags.length > 0 && (
-          <div className="tags modal-tags">
-            {image.tags.slice(0, 5).map((tag) => (
-              <span key={tag} className="tag">{tag}</span>
-            ))}
-          </div>
-        )}
-        <div className="share-links">
-          {links.map(({ label, value }) => (
-            <div key={label} className="share-row">
-              <span className="share-label">{label}</span>
-              <input readOnly value={value} onClick={(e) => e.target.select()} />
-              <button
-                className={copied === label ? "copied" : ""}
-                onClick={() => copy(value, label)}
-              >
-                {copied === label ? "✓" : "복사"}
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+function normalizeImage(apiImg) {
+  return {
+    id:         apiImg.key,
+    key:        apiImg.key,
+    url:        apiImg.cdn_url,
+    name:       apiImg.key.split('/').pop(),
+    ratio:      '4/3',
+    tags:       apiImg.tags   || [],
+    albumId:    null,
+    views:      apiImg.views  || 0,
+    size:       apiImg.size,
+    uploadedAt: apiImg.uploaded_at,
+  };
 }
 
 export default function App() {
-  const [token, setToken] = useState(localStorage.getItem("token") || "");
-  const [email, setEmail] = useState(localStorage.getItem("email") || "");
-  const [authMode, setAuthMode] = useState("login");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authError, setAuthError] = useState("");
-  const [showAuth, setShowAuth] = useState(false);
+  // ── routing ───────────────────────────────────────────────────────────────
+  const [page,     setPage]     = useState('main');
+  const [curAlbum, setCurAlbum] = useState(null);
 
-  const [images, setImages] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const [shareImage, setShareImage] = useState(null);
-  const [uploadError, setUploadError] = useState("");
+  // ── auth ──────────────────────────────────────────────────────────────────
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!getToken());
+  const [username,   setUsername]   = useState(() => getUsername());
 
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  // ── data ──────────────────────────────────────────────────────────────────
+  const [images,  setImages]  = useState([]);
+  const [albums,  setAlbums]  = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  // ── gallery filters ───────────────────────────────────────────────────────
+  const [filter,   setFilter]   = useState('all');
+  const [search,   setSearch]   = useState('');
+  const [sortBy,   setSortBy]   = useState('newest');
+  const [viewMode, setViewMode] = useState('masonry');
+
+  // ── selection ─────────────────────────────────────────────────────────────
+  const [selMode, setSelMode] = useState(false);
+  const [selIds,  setSelIds]  = useState(new Set());
+
+  // ── upload ────────────────────────────────────────────────────────────────
+  const [uploadPct,  setUploadPct]  = useState(-1);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // ── modals ────────────────────────────────────────────────────────────────
+  const [lightbox,     setLightbox]     = useState({ open: false, images: [], idx: 0 });
+  const [shareModal,   setShareModal]   = useState({ open: false, img: null });
+  const [albumPicker,  setAlbumPicker]  = useState({ open: false, img: null });
+  const [newAlbumOpen, setNewAlbumOpen] = useState(false);
+
+  const { toasts, addToast } = useToast();
+
+  // ── load images from API ──────────────────────────────────────────────────
+  const loadImages = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchImages();
+      setImages(data.images.map(normalizeImage));
+    } catch {
+      addToast('이미지 불러오기 실패', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [addToast]);
 
   useEffect(() => {
-    // Cognito OAuth 콜백 처리
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get("code");
-    if (code) {
-      window.history.replaceState({}, "", "/");
-      exchangeCodeForToken(code).then((data) => {
-        if (data.access_token) {
-          localStorage.setItem("token", data.access_token);
-          // id_token에서 이메일 추출
-          try {
-            const payload = JSON.parse(atob(data.id_token.split(".")[1]));
-            localStorage.setItem("email", payload.email || "Google 사용자");
-            setEmail(payload.email || "Google 사용자");
-          } catch {}
-          setToken(data.access_token);
-        }
-      });
+    if (isLoggedIn) loadImages();
+  }, [isLoggedIn, loadImages]);
+
+  // ── computed ──────────────────────────────────────────────────────────────
+  const processedImages = useMemo(() => {
+    let result = images;
+    if (filter !== 'all') result = result.filter(i => i.tags.includes(filter));
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(i =>
+        i.name.toLowerCase().includes(q) || i.tags.some(t => t.toLowerCase().includes(q))
+      );
     }
-    fetchImages();
+    result = [...result];
+    switch (sortBy) {
+      case 'newest': result.sort((a, b) => b.id.localeCompare(a.id));      break;
+      case 'oldest': result.sort((a, b) => a.id.localeCompare(b.id));      break;
+      case 'views':  result.sort((a, b) => b.views - a.views);             break;
+      case 'name':   result.sort((a, b) => a.name.localeCompare(b.name));  break;
+    }
+    return result;
+  }, [images, filter, search, sortBy]);
+
+  const allTags = useMemo(
+    () => [...new Set(images.flatMap(i => i.tags))].sort(),
+    [images]
+  );
+
+  const albumImages = useMemo(
+    () => curAlbum ? images.filter(i => i.albumId === curAlbum.id) : [],
+    [images, curAlbum]
+  );
+
+  // ── keyboard ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e) => {
+      if (lightbox.open) {
+        if (e.key === 'ArrowLeft')  openLightbox(lightbox.idx - 1, lightbox.images);
+        if (e.key === 'ArrowRight') openLightbox(lightbox.idx + 1, lightbox.images);
+        if (e.key === 'Escape')     setLightbox(s => ({ ...s, open: false }));
+        return;
+      }
+      if (e.key === 'Escape') {
+        setShareModal(s => ({ ...s, open: false }));
+        setAlbumPicker(s => ({ ...s, open: false }));
+        setNewAlbumOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
+
+  // ── handlers ──────────────────────────────────────────────────────────────
+  const openLightbox = useCallback((idx, imgList) => {
+    const len = imgList.length;
+    if (!len) return;
+    setLightbox({ open: true, images: imgList, idx: ((idx % len) + len) % len });
   }, []);
 
-  async function fetchImages() {
-    try {
-      const res = await axios.get(`${API}/api/images`);
-      setImages(res.data.images);
-    } catch {}
-  }
+  const handleLogin = useCallback((uname) => {
+    setIsLoggedIn(true);
+    setUsername(uname);
+    setPage('main');
+    addToast('로그인 완료!', 'success');
+  }, [addToast]);
 
-  async function handleAuth(e) {
-    e.preventDefault();
-    setAuthError("");
+  const handleLogout = useCallback(() => {
+    setToken(null);
+    setIsLoggedIn(false);
+    setUsername('');
+    setImages([]);
+    setAlbums([]);
+    setPage('login');
+  }, []);
+
+  const handleGuest = useCallback(() => {
+    setIsLoggedIn(false);
+    setPage('main');
+  }, []);
+
+  const handleUpload = useCallback(async (file) => {
+    if (!file) return;
+    setUploadPct(0);
     try {
-      const endpoint = authMode === "login" ? "/api/auth/login" : "/api/auth/register";
-      const { data } = await axios.post(`${API}${endpoint}`, {
-        email: authEmail,
-        password: authPassword,
-      });
-      localStorage.setItem("token", data.access_token);
-      localStorage.setItem("email", data.email);
-      setToken(data.access_token);
-      setEmail(data.email);
-      setShowAuth(false);
+      const { key, url } = await uploadToS3(file, setUploadPct);
+      setImages(prev => [{
+        id: key, key, url,
+        name:     file.name,
+        ratio:    '4/3',
+        tags:     [],
+        albumId:  null,
+        views:    0,
+      }, ...prev]);
+      setUploadPct(-1);
+      addToast(`"${file.name}" 업로드 완료!`, 'upload');
     } catch (err) {
-      setAuthError(err.response?.data?.detail || "오류가 발생했습니다");
+      setUploadPct(-1);
+      addToast(err.message || '업로드 실패했어요', 'error');
     }
-  }
+  }, [addToast]);
 
-  function logout() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("email");
-    setToken("");
-    setEmail("");
-  }
-
-  async function uploadFile(file) {
-    setUploading(true);
-    setUploadError("");
+  const handleDelete = useCallback(async (img) => {
     try {
-      const { data } = await axios.post(`${API}/api/upload/presigned`, {
-        filename: file.name,
-        content_type: file.type,
-      });
-      await axios.put(data.upload_url, file, {
-        headers: { "Content-Type": file.type },
-      });
-      setTimeout(async () => {
-        await fetchImages();
-        const res = await axios.get(`${API}/api/images`);
-        const uploaded = res.data.images.find((img) => img.key === data.image_key);
-        setShareImage(uploaded || { key: data.image_key, cdn_url: data.cdn_url, tags: [] });
-      }, 1500);
-    } catch (err) {
-      const msg = err.response?.data?.detail || err.message || "업로드 실패";
-      setUploadError(msg);
-    } finally {
-      setUploading(false);
+      await deleteImage(img.key);
+      setImages(prev => prev.filter(i => i.id !== img.id));
+      addToast(`"${img.name}" 삭제됨`, 'success');
+    } catch {
+      addToast('삭제 실패했어요', 'error');
     }
-  }
+  }, [addToast]);
 
-  function onFileChange(e) {
-    const file = e.target.files[0];
-    if (file) uploadFile(file);
-  }
+  const handleBulkDelete = useCallback(async () => {
+    const toDelete = images.filter(i => selIds.has(i.id));
+    const count    = toDelete.length;
+    try {
+      await Promise.all(toDelete.map(img => deleteImage(img.key)));
+      setImages(prev => prev.filter(i => !selIds.has(i.id)));
+      setSelIds(new Set());
+      setSelMode(false);
+      addToast(`${count}개 삭제됨`, 'success');
+    } catch {
+      addToast('일부 삭제 실패', 'error');
+    }
+  }, [images, selIds, addToast]);
 
-  function onDrop(e) {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) uploadFile(file);
-  }
+  const handleAssignAlbum = useCallback((img, albumId) => {
+    setImages(prev => prev.map(i => i.id === img.id ? { ...i, albumId } : i));
+    setAlbumPicker({ open: false, img: null });
+    const albumName = albums.find(a => a.id === albumId)?.name;
+    addToast(albumName ? `"${img.name}" → "${albumName}"` : '앨범에서 제거됨', 'album');
+  }, [albums, addToast]);
 
-  async function deleteImage(key) {
-    await axios.delete(`${API}/api/images/${key}`, { headers });
-    fetchImages();
-  }
+  const handleCreateAlbum = useCallback((name) => {
+    setAlbums(prev => [...prev, {
+      id: Date.now(), name, cover: '', createdAt: new Date().toISOString().slice(0, 10),
+    }]);
+    setNewAlbumOpen(false);
+    addToast(`"${name}" 앨범 생성!`, 'album');
+  }, [addToast]);
 
+  const handleDeleteAlbum = useCallback((album) => {
+    setAlbums(prev => prev.filter(a => a.id !== album.id));
+    setImages(prev => prev.map(i => i.albumId === album.id ? { ...i, albumId: null } : i));
+    setPage('albums');
+    setCurAlbum(null);
+    addToast(`"${album.name}" 앨범 삭제됨`, 'success');
+  }, [addToast]);
+
+  const toggleSelect = useCallback((id) => {
+    setSelIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  // ── render ────────────────────────────────────────────────────────────────
   return (
     <div className="app">
-      <header>
-        <div className="header-top">
-          <h1>☁️ Nimbus Gallery</h1>
-          <div className="header-actions">
-            {token ? (
-              <>
-                <span className="user-email">{email}</span>
-                <button className="btn-outline" onClick={logout}>로그아웃</button>
-              </>
-            ) : (
-              <button className="btn-outline" onClick={() => setShowAuth(true)}>로그인</button>
-            )}
-          </div>
-        </div>
-        <p>Cloud-native image hosting · AWS S3 + CloudFront + Lambda</p>
-      </header>
+      <ToastContainer toasts={toasts} />
 
-      {/* 로그인 모달 */}
-      {showAuth && (
-        <div className="modal-backdrop" onClick={() => setShowAuth(false)}>
-          <div className="modal auth-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowAuth(false)}>✕</button>
-            <div className="auth-tabs">
-              <button className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>로그인</button>
-              <button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>회원가입</button>
-            </div>
-            <a href={getGoogleLoginUrl()} className="google-login-btn">
-              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="" />
-              Google로 로그인
-            </a>
-            <div className="auth-divider"><span>또는</span></div>
-            <form onSubmit={handleAuth}>
-              <input type="email" placeholder="이메일" value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)} required />
-              <input type="password" placeholder="비밀번호" value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)} required />
-              {authError && <p className="auth-error">{authError}</p>}
-              <button type="submit" className="auth-submit">
-                {authMode === "login" ? "로그인" : "회원가입"}
-              </button>
-            </form>
-          </div>
-        </div>
+      {page !== 'login' && (
+        <Header
+          page={page}
+          isLoggedIn={isLoggedIn}
+          username={username}
+          onGallery={() => { setPage('main'); setSelMode(false); setSelIds(new Set()); }}
+          onAlbums={() => setPage('albums')}
+          onLogin={() => setPage('login')}
+          onLogout={handleLogout}
+        />
       )}
 
-      {/* 공유 모달 */}
-      {shareImage && <ShareModal image={shareImage} onClose={() => setShareImage(null)} />}
+      {page === 'login' && (
+        <LoginPage onLogin={handleLogin} onGuest={handleGuest} />
+      )}
 
-      <div
-        className={`upload-zone ${dragOver ? "drag-over" : ""}`}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-        onClick={() => document.getElementById("fileInput").click()}
-      >
-        {uploading
-          ? <p>⏳ 업로드 중...</p>
-          : uploadError
-            ? <><p style={{color:"#f87171"}}>❌ {uploadError}</p><p className="upload-sub">다시 시도하려면 클릭</p></>
-            : <><p>🖼 이미지를 드래그하거나 클릭해서 업로드</p><p className="upload-sub">로그인 없이 바로 사용 가능</p></>
-        }
-        <input id="fileInput" type="file" accept="image/*" style={{ display: "none" }} onChange={onFileChange} />
-      </div>
+      {page === 'main' && (
+        <GalleryPage
+          images={processedImages}
+          allTags={allTags}
+          totalCount={images.length}
+          loading={loading}
+          filter={filter}       onFilter={setFilter}
+          search={search}       onSearch={setSearch}
+          sortBy={sortBy}       onSort={setSortBy}
+          viewMode={viewMode}   onViewMode={setViewMode}
+          selMode={selMode}     onToggleSelMode={() => { setSelMode(v => !v); setSelIds(new Set()); }}
+          selIds={selIds}       onToggleSelect={toggleSelect}
+          onBulkDelete={handleBulkDelete}
+          uploadPct={uploadPct}
+          isDragging={isDragging}
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleUpload(e.dataTransfer.files?.[0]); }}
+          onFileChange={(e) => handleUpload(e.target.files?.[0])}
+          onOpenLightbox={(idx) => openLightbox(idx, processedImages)}
+          onShare={(img) => setShareModal({ open: true, img })}
+          onAlbum={(img) => setAlbumPicker({ open: true, img })}
+          onDelete={handleDelete}
+        />
+      )}
 
-      <div className="stats">총 {images.length}개 이미지</div>
+      {page === 'albums' && (
+        <AlbumsPage
+          albums={albums}
+          images={images}
+          onOpenAlbum={(alb) => { setCurAlbum(alb); setPage('album'); }}
+          onNewAlbum={() => setNewAlbumOpen(true)}
+        />
+      )}
 
-      <div className="gallery">
-        {images.map((img) => {
-          const thumbKey = img.key.replace("images/", "thumbnails/");
-          return (
-            <div key={img.key} className="card">
-              <img
-                src={`${CDN}/${thumbKey}`}
-                alt={img.key}
-                onError={(e) => { e.target.src = img.cdn_url; }}
-                onClick={() => setShareImage(img)}
-                style={{ cursor: "pointer" }}
-              />
-              {img.tags && img.tags.length > 0 && (
-                <div className="tags">
-                  {img.tags.slice(0, 4).map((tag) => (
-                    <span key={tag} className="tag">{tag}</span>
-                  ))}
-                </div>
-              )}
-              <div className="card-actions">
-                <button onClick={() => setShareImage(img)}>공유</button>
-                {token && (
-                  <button className="delete" onClick={() => deleteImage(img.key)}>삭제</button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {page === 'album' && curAlbum && (
+        <AlbumDetail
+          album={curAlbum}
+          images={albumImages}
+          onBack={() => setPage('albums')}
+          onDelete={() => handleDeleteAlbum(curAlbum)}
+          onOpenLightbox={(idx) => openLightbox(idx, albumImages)}
+          onShare={(img) => setShareModal({ open: true, img })}
+          onAlbum={(img) => setAlbumPicker({ open: true, img })}
+          onDeleteImage={handleDelete}
+        />
+      )}
+
+      {lightbox.open && (
+        <Lightbox
+          images={lightbox.images}
+          idx={lightbox.idx}
+          onClose={() => setLightbox(s => ({ ...s, open: false }))}
+          onPrev={() => openLightbox(lightbox.idx - 1, lightbox.images)}
+          onNext={() => openLightbox(lightbox.idx + 1, lightbox.images)}
+        />
+      )}
+
+      {shareModal.open && (
+        <ShareModal
+          img={shareModal.img}
+          cdnBase="https://d1pogf5m0mafe7.cloudfront.net"
+          onClose={() => setShareModal({ open: false, img: null })}
+          onCopy={() => addToast('링크 복사됨!', 'copy')}
+        />
+      )}
+
+      {albumPicker.open && (
+        <AlbumPicker
+          img={albumPicker.img}
+          albums={albums}
+          images={images}
+          onAssign={(albumId) => handleAssignAlbum(albumPicker.img, albumId)}
+          onRemove={() => handleAssignAlbum(albumPicker.img, null)}
+          onClose={() => setAlbumPicker({ open: false, img: null })}
+        />
+      )}
+
+      {newAlbumOpen && (
+        <NewAlbumModal
+          onCreate={handleCreateAlbum}
+          onClose={() => setNewAlbumOpen(false)}
+        />
+      )}
     </div>
   );
 }
